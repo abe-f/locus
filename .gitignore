@@ -1,0 +1,6 @@
+build/
+pin-3.31/
+outputs/
+locus_pintool
+pin.log
+pintool.log
