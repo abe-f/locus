@@ -1,5 +1,3 @@
-// locus_pintool.cpp — minimal, fork/exec-aware, shared results root, control file start/stop
-
 #include "pin.H"
 #include <atomic>
 #include <cinttypes>
@@ -19,13 +17,12 @@
 #include <ctime>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>     // getpid
+#include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 
 namespace {
 
-// ----------------------- Knobs -----------------------
 KNOB<UINT32> KnobPageShift(KNOB_MODE_WRITEONCE, "pintool",
     "pageshift", "12", "Page shift (12 for 4KiB pages)");
 KNOB<BOOL>   KnobRecordWrites(KNOB_MODE_WRITEONCE, "pintool",
@@ -46,12 +43,10 @@ KNOB<BOOL>   KnobStartEnabled(KNOB_MODE_WRITEONCE, "pintool",
 KNOB<BOOL>   KnobLogCommands(KNOB_MODE_WRITEONCE, "pintool",
     "log_commands", "0", "If 1, log control commands to stderr");
 
-// ----------------------- Types -----------------------
 using VpnT   = uint64_t;
 using CntT   = uint64_t;
 using VpnMap = std::unordered_map<VpnT, CntT>;
 
-// ----------------------- TLS -------------------------
 TLS_KEY g_tls_key;
 struct ThreadData {
     THREADID tid;
@@ -64,12 +59,10 @@ static inline ThreadData* TD(THREADID tid) {
     return static_cast<ThreadData*>(PIN_GetThreadData(g_tls_key, tid));
 }
 
-// ----------------------- Global state ----------------
 std::mutex g_threads_mu;
 std::vector<ThreadData*> g_threads;
 std::atomic<bool> g_collecting{true};
 
-// ----------------------- Utils -----------------------
 static inline VpnT AddrToVpn(ADDRINT addr, UINT32 page_shift) {
     return static_cast<VpnT>(static_cast<uint64_t>(addr) >> page_shift);
 }
@@ -79,7 +72,7 @@ static bool MkdirIfNeeded(const std::string& path, mode_t mode = 0755) {
     if (::stat(path.c_str(), &st) == 0) return S_ISDIR(st.st_mode);
     return ::mkdir(path.c_str(), mode) == 0;
 }
-// Create outputs/results<N> using mkdir loop (collision-safe).
+// Create outputs/results<N> using mkdir loop
 static std::string NextResultsRoot(const std::string& base) {
     auto slash = base.find_last_of('/');
     if (slash != std::string::npos) MkdirIfNeeded(base.substr(0, slash));
@@ -118,7 +111,6 @@ static std::string ReadComm() {
     return s;
 }
 
-// ----------------------- Recording -------------------
 static inline VOID CountVpn(VpnMap& m, VpnT vpn) {
     auto it = m.find(vpn);
     if (it != m.end()) it->second += 1;
@@ -151,7 +143,6 @@ static VOID InsInstrument(INS ins, VOID*) {
     }
 }
 
-// -------------- Aggregation & Output -----------------
 struct Header {
     uint32_t magic;       // "LOCS" = 0x4C4F4353
     uint32_t version;     // = 1
@@ -217,7 +208,6 @@ static VOID DumpResultsOnce() {
     }
 }
 
-// ---------------- Thread lifecycle -------------------
 static VOID ThreadStart(THREADID tid, CONTEXT*, INT32, VOID*) {
     auto* td = new ThreadData(tid, static_cast<size_t>(KnobReservePerThread.Value()));
     PIN_SetThreadData(g_tls_key, td, tid);
@@ -225,7 +215,6 @@ static VOID ThreadStart(THREADID tid, CONTEXT*, INT32, VOID*) {
 }
 static VOID ThreadFini(THREADID, const CONTEXT*, INT32, VOID*) { }
 
-// --------------- Control file polling ----------------
 static VOID ControlThread(VOID* arg) {
     const char* path = static_cast<const char*>(arg);
 
@@ -275,14 +264,13 @@ static VOID ControlThread(VOID* arg) {
     }
 }
 
-// --------------- Follow child processes --------------
 static BOOL FollowChild(CHILD_PROCESS child, VOID* /*userData*/) {
     // For execv()-spawned children; enabled when pin is run with -follow_execv 1
     (void)child;
     return TRUE;
 }
 
-// --------------- Fork handling (pure fork, no exec) --
+// Fork handling
 static VOID BeforeFork(THREADID, const CONTEXT*, VOID*) { }
 static VOID AfterForkInParent(THREADID, const CONTEXT*, VOID*) { }
 static VOID AfterForkInChild(THREADID tid, const CONTEXT*, VOID*) {
@@ -305,7 +293,6 @@ static VOID AfterForkInChild(THREADID tid, const CONTEXT*, VOID*) {
     // results root is inherited via LOCUS_RESULTS_ROOT env var
 }
 
-// ----------------------- Main ------------------------
 static INT32 Usage() {
     std::cerr << "Locus pintool (shared results<N> per run; per-PID subdirs; control file; follows execv; handles fork).\n"
               << "Knobs:\n"
